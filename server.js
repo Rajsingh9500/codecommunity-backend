@@ -8,12 +8,16 @@ const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 
+// Models
 const User = require("./models/User");
 const Message = require("./models/Message");
 
+// Load env variables
 dotenv.config();
 
 const app = express();
+
+// Middleware
 app.use(express.json());
 app.use(
   cors({
@@ -46,9 +50,12 @@ app.use("/api/notifications", require("./routes/notification"));
 app.use("/api/developers", require("./routes/developers"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/reviews", require("./routes/reviews"));
-app.use("/uploads", express.static(uploadDir));
 app.use("/api/chat", require("./routes/chat"));
 
+// ✅ Serve static uploads
+app.use("/uploads", express.static(uploadDir));
+
+// ✅ Health check
 app.get("/", (req, res) => res.json({ success: true, message: "🚀 API running" }));
 
 // ✅ Global error handler
@@ -66,14 +73,15 @@ const io = new Server(server, {
   },
 });
 
-// ✅ Socket.IO auth
+// ✅ Socket.IO authentication
 io.use(async (socket, next) => {
   try {
-    const token = socket.handshake.auth.token;
-    if (!token) return next(new Error("No token"));
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("No token provided"));
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select("-password");
+
     if (!user) return next(new Error("User not found"));
 
     socket.user = user;
@@ -91,63 +99,75 @@ io.on("connection", (socket) => {
 
   // 🔹 Send message
   socket.on("sendMessage", async (data) => {
-    const newMessage = new Message({
-      sender: socket.user._id,
-      receiver: data.receiver,
-      message: data.message,
-      delivered: false,
-      read: false,
-    });
-    await newMessage.save();
-    const populatedMsg = await newMessage.populate("sender receiver", "name role");
-
-    // Send message to receiver + sender
-    io.to(data.receiver).emit("receiveMessage", populatedMsg);
-    io.to(socket.user._id.toString()).emit("receiveMessage", populatedMsg);
-
-    // If receiver is connected, mark as delivered
-    const receiverSockets = await io.in(data.receiver).fetchSockets();
-    if (receiverSockets.length > 0) {
-      await Message.findByIdAndUpdate(newMessage._id, { delivered: true });
-      io.to(socket.user._id.toString()).emit("messageDelivered", {
-        messageId: newMessage._id,
+    try {
+      const newMessage = new Message({
+        sender: socket.user._id,
+        receiver: data.receiver,
+        message: data.message,
+        delivered: false,
+        read: false,
       });
+      await newMessage.save();
+      const populatedMsg = await newMessage.populate("sender receiver", "name role");
+
+      // Send to receiver + sender
+      io.to(data.receiver).emit("receiveMessage", populatedMsg);
+      io.to(socket.user._id.toString()).emit("receiveMessage", populatedMsg);
+
+      // Mark delivered if receiver is connected
+      const receiverSockets = await io.in(data.receiver).fetchSockets();
+      if (receiverSockets.length > 0) {
+        await Message.findByIdAndUpdate(newMessage._id, { delivered: true });
+        io.to(socket.user._id.toString()).emit("messageDelivered", {
+          messageId: newMessage._id,
+        });
+      }
+    } catch (err) {
+      console.error("❌ Send message error:", err.message);
     }
   });
 
-  // 🔹 Mark undelivered messages as delivered when user connects
+  // 🔹 Mark undelivered messages as delivered
   socket.on("markDelivered", async () => {
-    const undelivered = await Message.find({
-      receiver: socket.user._id,
-      delivered: false,
-    });
-
-    if (undelivered.length > 0) {
-      await Message.updateMany(
-        { receiver: socket.user._id, delivered: false },
-        { $set: { delivered: true } }
-      );
-
-      undelivered.forEach((msg) => {
-        io.to(msg.sender.toString()).emit("messageDelivered", {
-          messageId: msg._id,
-        });
+    try {
+      const undelivered = await Message.find({
+        receiver: socket.user._id,
+        delivered: false,
       });
+
+      if (undelivered.length > 0) {
+        await Message.updateMany(
+          { receiver: socket.user._id, delivered: false },
+          { $set: { delivered: true } }
+        );
+
+        undelivered.forEach((msg) => {
+          io.to(msg.sender.toString()).emit("messageDelivered", {
+            messageId: msg._id,
+          });
+        });
+      }
+    } catch (err) {
+      console.error("❌ Mark delivered error:", err.message);
     }
   });
 
   // 🔹 Mark messages as read
   socket.on("readMessages", async (fromUserId) => {
-    const updated = await Message.updateMany(
-      { sender: fromUserId, receiver: socket.user._id, read: false },
-      { $set: { read: true } }
-    );
+    try {
+      const updated = await Message.updateMany(
+        { sender: fromUserId, receiver: socket.user._id, read: false },
+        { $set: { read: true } }
+      );
 
-    if (updated.modifiedCount > 0) {
-      io.to(fromUserId).emit("messagesRead", { by: socket.user._id });
+      if (updated.modifiedCount > 0) {
+        io.to(fromUserId).emit("messagesRead", { by: socket.user._id });
+      }
+
+      io.to(socket.user._id.toString()).emit("resetUnread", { from: fromUserId });
+    } catch (err) {
+      console.error("❌ Read messages error:", err.message);
     }
-
-    io.to(socket.user._id.toString()).emit("resetUnread", { from: fromUserId });
   });
 
   // 🔹 Typing indicator
@@ -167,5 +187,5 @@ io.on("connection", (socket) => {
 // ✅ Start server
 const PORT = process.env.PORT || 5001;
 server.listen(PORT, () =>
-  console.log(`🚀 Server + Socket.IO running on http://localhost:${PORT}`)
+  console.log(`🚀 Server + Socket.IO running on port ${PORT}`)
 );

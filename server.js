@@ -68,10 +68,14 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: [
+      process.env.CLIENT_URL || "http://localhost:3000", 
+      "https://codecommunity-app.netlify.app" // ✅ your Netlify frontend
+    ],
     credentials: true,
   },
 });
+
 
 // ✅ Socket.IO authentication
 io.use(async (socket, next) => {

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "CodeCommunity backend with Express, MongoDB, and Socket.IO",
   "main": "server.js",
+  
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
@@ -27,4 +28,5 @@
   "keywords": [],
   "author": "Raj Singh",
   "license": "ISC"
+  
 }

@@ -6,6 +6,8 @@ services:
     region: oregon   # options: oregon, frankfurt, singapore
     buildCommand: "npm install"
     startCommand: "npm start"
+    buildCommand: "npm install && npm rebuild mongoose"
+
     envVars:
       - key: NODE_VERSION
         value: 20.19.5   # use the stable Node 20.x

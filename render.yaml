@@ -7,6 +7,7 @@ services:
     buildCommand: "npm install"
     startCommand: "npm start"
     buildCommand: "npm install && npm rebuild mongoose"
+    buildCommand: "npm install && npm install debug@4.3.4"
 
     envVars:
       - key: NODE_VERSION

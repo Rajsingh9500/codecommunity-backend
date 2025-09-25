@@ -3,12 +3,12 @@ services:
     name: codecommunity-backend
     env: node
     plan: free
-    region: oregon   # you can change to frankfurt, singapore, etc.
+    region: oregon   # options: oregon, frankfurt, singapore
     buildCommand: "npm install"
     startCommand: "npm start"
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 20.19.5   # use the stable Node 20.x
       - key: MONGODB_URI
         sync: false
       - key: JWT_SECRET
@@ -16,8 +16,6 @@ services:
       - key: CLIENT_URL
         sync: false
       - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_UPLOAD_PRESET
         sync: false
       - key: CLOUDINARY_API_KEY
         sync: false

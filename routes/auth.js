@@ -4,8 +4,14 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const multer = require("multer");
+const { uploadToCloudinary } = require("../utils/cloudinaryUpload");
 
 const router = express.Router();
+
+/* ------------------ Multer for image upload ------------------ */
+const storage = multer.memoryStorage(); // keep file in memory before Cloudinary
+const upload = multer({ storage });
 
 /* ------------------ Nodemailer (SendGrid) ------------------ */
 const transporter = nodemailer.createTransport({
@@ -16,8 +22,12 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+/* ------------------ Helper: Generate JWT ------------------ */
+const generateToken = (userId) =>
+  jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
+
 /* ------------------ Register ------------------ */
-router.post("/register", async (req, res) => {
+router.post("/register", upload.single("avatar"), async (req, res) => {
   try {
     const { name, email, role, password } = req.body;
     if (!name || !email || !password) {
@@ -30,17 +40,28 @@ router.post("/register", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Upload avatar if provided
+    let avatarData = { url: "", public_id: "" };
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer, "users");
+      avatarData = { url: result.secure_url, public_id: result.public_id };
+    }
+
     const newUser = await User.create({
       name,
       email,
       role: role || "client",
       password: hashedPassword,
-      avatar: { url: "", public_id: "" }, // ✅ empty avatar until uploaded
+      avatar: avatarData,
     });
+
+    const token = generateToken(newUser._id);
 
     res.json({
       success: true,
       message: "User registered successfully",
+      token,
       user: {
         id: newUser._id,
         name: newUser.name,
@@ -59,13 +80,18 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ success: false, message: "Invalid credentials" });
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid credentials" });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Invalid credentials" });
+    }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    const token = generateToken(user._id);
 
     res.json({
       success: true,
@@ -75,11 +101,52 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        avatar: user.avatar, // ✅ return avatar object
+        avatar: user.avatar,
       },
     });
   } catch (err) {
     console.error("❌ Login error:", err.message);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/* ------------------ Update Avatar ------------------ */
+router.put("/avatar", upload.single("avatar"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "No token provided" });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // ✅ Upload new avatar
+    const result = await uploadToCloudinary(req.file.buffer, "users");
+
+    // ✅ If old avatar exists, delete from Cloudinary
+    if (user.avatar?.public_id) {
+      const cloudinary = require("cloudinary").v2;
+      await cloudinary.uploader.destroy(user.avatar.public_id);
+    }
+
+    user.avatar = { url: result.secure_url, public_id: result.public_id };
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Avatar updated successfully",
+      avatar: user.avatar,
+    });
+  } catch (err) {
+    console.error("❌ Update avatar error:", err.message);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

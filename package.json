@@ -7,7 +7,6 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "rebuild-mongoose": "yarn remove mongoose && yarn add mongoose@7.8.7 mongodb@5.9.0"
-
   },
   "dependencies": {
     "axios": "1.12.2",
@@ -20,8 +19,8 @@
     "form-data": "4.0.4",
     "helmet": "8.1.0",
     "jsonwebtoken": "9.0.2",
+    "mongodb": "5.9.0",
     "mongoose": "7.8.7",
-    "mongodb": "5.9.0",          
     "morgan": "1.10.1",
     "mquery": "5.0.0",
     "multer": "2.0.2",

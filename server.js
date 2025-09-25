@@ -2,11 +2,12 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const path = require("path");
-const fs = require("fs");
 const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const cloudinary = require("cloudinary").v2;
 
 // Models
 const User = require("./models/User");
@@ -17,8 +18,12 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
+// ----------------------
+// 🔹 Middleware
+// ----------------------
 app.use(express.json());
+app.use(helmet()); // security headers
+app.use(morgan("dev")); // request logging
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -26,23 +31,35 @@ app.use(
   })
 );
 
-// ✅ Ensure uploads folder exists
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-// ✅ MongoDB connection
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => {
-    console.error("❌ MongoDB error:", err.message);
+// ----------------------
+// 🔹 MongoDB Connection
+// ----------------------
+(async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("✅ MongoDB connected");
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err.message);
     process.exit(1);
-  });
+  }
+})();
 
-// ✅ Routes
+mongoose.connection.on("disconnected", () => {
+  console.warn("⚠️ MongoDB disconnected. Trying to reconnect...");
+});
+
+// ----------------------
+// 🔹 Cloudinary Config (instead of local uploads)
+// ----------------------
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// ----------------------
+// 🔹 Routes
+// ----------------------
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/projects", require("./routes/projects"));
 app.use("/api/hire", require("./routes/hire"));
@@ -51,12 +68,13 @@ app.use("/api/developers", require("./routes/developers"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/chat", require("./routes/chat"));
+app.use("/api/upload", require("./routes/upload"));
 
-// ✅ Serve static uploads
-app.use("/uploads", express.static(uploadDir));
 
 // ✅ Health check
-app.get("/", (req, res) => res.json({ success: true, message: "🚀 API running" }));
+app.get("/", (req, res) =>
+  res.json({ success: true, message: "🚀 API running on Render" })
+);
 
 // ✅ Global error handler
 app.use((err, req, res, next) => {
@@ -64,20 +82,21 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: "Server error" });
 });
 
-// ✅ Create HTTP + Socket.IO server
+// ----------------------
+// 🔹 HTTP + Socket.IO
+// ----------------------
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: [
-      process.env.CLIENT_URL || "http://localhost:3000", 
-      "https://codecommunity-app.netlify.app" // ✅ your Netlify frontend
+      process.env.CLIENT_URL || "http://localhost:3000",
+      "https://codecommunity-app.netlify.app",
     ],
     credentials: true,
   },
 });
 
-
-// ✅ Socket.IO authentication
+// ✅ Socket.IO authentication middleware
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
@@ -112,7 +131,10 @@ io.on("connection", (socket) => {
         read: false,
       });
       await newMessage.save();
-      const populatedMsg = await newMessage.populate("sender receiver", "name role");
+      const populatedMsg = await newMessage.populate(
+        "sender receiver",
+        "name role"
+      );
 
       // Send to receiver + sender
       io.to(data.receiver).emit("receiveMessage", populatedMsg);
@@ -168,7 +190,9 @@ io.on("connection", (socket) => {
         io.to(fromUserId).emit("messagesRead", { by: socket.user._id });
       }
 
-      io.to(socket.user._id.toString()).emit("resetUnread", { from: fromUserId });
+      io.to(socket.user._id.toString()).emit("resetUnread", {
+        from: fromUserId,
+      });
     } catch (err) {
       console.error("❌ Read messages error:", err.message);
     }
@@ -188,7 +212,9 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ Start server
+// ----------------------
+// 🔹 Start server
+// ----------------------
 const PORT = process.env.PORT || 5001;
 server.listen(PORT, () =>
   console.log(`🚀 Server + Socket.IO running on port ${PORT}`)

@@ -36,4 +36,3 @@
   "author": "Raj Singh",
   "license": "ISC"
 }
-git commit -m "Pin Node version to 20.x for Render"
